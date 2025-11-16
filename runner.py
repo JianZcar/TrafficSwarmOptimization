@@ -495,7 +495,7 @@ def run_sumo(n, summaryFile='summary.xml', tl_data=None, thetype=None, use_gui=F
     if thetype == "aco":
         generate_aco_tls_logic(n, tl_data)
     elif thetype == "pso":
-        generate_pso_tls_logic(tl_data)
+        generate_pso_tls_logic(n, tl_data)
     elif len(tl_data) == 4:
         # default setup case
         generate_tls_logic(n, tl_data)

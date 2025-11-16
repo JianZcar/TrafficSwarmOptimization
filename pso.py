@@ -4,7 +4,7 @@ import argparse
 from runner import run_sumo
 
 
-def pso(nparticles, niters, c0, c1, outfile="pso", min_time=5.,
+def pso(nparticles, niters, c0, c1, n_intersections, outfile="pso", min_time=5.,
         max_time=30., max_velocity=10., seed=42):
     # ALGORITHM
     # n: number of particles
@@ -12,7 +12,7 @@ def pso(nparticles, niters, c0, c1, outfile="pso", min_time=5.,
     # optimus/optimal: globally best position/score
     # primes/primals: agent best position/score
     nstates = 4
-    nlights = 25
+    nlights = n_intersections
     # np.random.seed(seed)
 
     # initialize everything uniformly at random
@@ -28,7 +28,7 @@ def pso(nparticles, niters, c0, c1, outfile="pso", min_time=5.,
     t = 0  # Initialize t for initial logging
 
     for i in range(nparticles):
-        primals[i] = run_sumo(nlights, 'summary.xml', positions[i], "pso")
+        primals[i] = run_sumo(n_intersections, 'summary.xml', positions[i], "pso")
         primes[i] = positions[i]
         if primals[i] < optimal:
             optimal = primals[i]
@@ -68,7 +68,7 @@ def pso(nparticles, niters, c0, c1, outfile="pso", min_time=5.,
         # done after update to hit limit
         velocities = np.clip(velocities, -max_velocity, max_velocity)
         for i in range(nparticles):
-            score = run_sumo(0, 'summary.xml', positions[i], "pso")
+            score = run_sumo(n_intersections, 'summary.xml', positions[i], "pso")
             if score < primals[i]:
                 primes[i] = positions[i]
                 primals[i] = score
@@ -104,16 +104,19 @@ def main(arguments):
         'max_time', help="number of iterations", type=float, default=30.)
     parser.add_argument(
         'max_velocity', help="number of iterations", type=float, default=10.)
+    parser.add_argument(
+        'n_intersections', help="number of intersections (n*n grid)", type=int, default=1)
     args = parser.parse_args(arguments)
     nparticles = args.nparticles
     niters = args.niters
     c0 = args.c0
     c1 = args.c1
+    n_intersections = args.n_intersections
     min_time = args.min_time
     max_time = args.max_time
     max_velocity = args.max_velocity
     predfile = args.predfile
-    pso(nparticles, niters, c0, c1, predfile, min_time, max_time, max_velocity)
+    pso(nparticles, niters, c0, c1, n_intersections, predfile, min_time, max_time, max_velocity)
 
 
 if __name__ == '__main__':
