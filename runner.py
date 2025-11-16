@@ -69,7 +69,9 @@ def generate_direction_maps(n):
     west = {}
     temp = 0
     for i in range(1, n*n + 1):
-        if (i % n) != 1:
+        if n == 1:
+            west[i] = 5 # For n=1, node 1 connects to node 5 (west peripheral)
+        elif (i % n) != 1:
             west[i] = i - 1
         else:
             west[i] = n*(n+4) - temp
@@ -126,7 +128,7 @@ def generate_routefile(edge_prob, direction_map, n, seed_val):
             for j in range(num_cars):
                 this_route = {}
                 this_route["num"] = cars_so_far
-                this_route["source"] = np.random.randint(1, (n*(n+4) + 1))
+                this_route["source"] = np.random.randint(n*n + 1, (n*(n+4) + 1))
                 this_route["dir"] = route_dirs[np.random.randint(4)]
                 this_route["edges"] = []
                 this_route["curloc"] = this_route["source"]
@@ -189,12 +191,12 @@ def generate_routefile(edge_prob, direction_map, n, seed_val):
                     edgestring = edgestring + " " + str(edge)
                 edgestring = edgestring[1:]
 
-                print('    <route id="r%i" edges="%s" />' %
-                      (cars_so_far, edgestring), file=routes)
-                print('    <vehicle id="v%i" type="car" route="r%i" depart="%i" />' %
-                      (cars_so_far, cars_so_far, i), file=routes)
-
-                cars_so_far += 1
+                if edgestring:
+                    print('    <route id="r%i" edges="%s" />' %
+                          (cars_so_far, edgestring), file=routes)
+                    print('    <vehicle id="v%i" type="car" route="r%i" depart="%i" />' %
+                          (cars_so_far, cars_so_far, i), file=routes)
+                    cars_so_far += 1
         print("</routes>", file=routes)
 
 
@@ -206,21 +208,30 @@ def generate_tls_logic(n, times):
         for i in range(1, (n*n + 1)):
             print('    <tlLogic id="%i" programID="stuff" offset="0" type="static">' % (
                 i), file=logic)
-            print('         <phase duration="%d" state="rrrGGgrrrGGg" />' %
+            # 16-character phase strings to match the 16 links created by netconvert (4 approaches * (Right, Straight, Left, U-turn))
+            # Phase 1: E/W Straight + Right + U-turn Green
+            print('         <phase duration="%d" state="rrrrGGgGrrrrGGgG" />' %
                   (times[0]), file=logic)
-            print('         <phase duration="%d" state="rrryygrrryyg" />' %
+            # Phase 2: E/W Yellow
+            print('         <phase duration="%d" state="rrrryygyrrrryygy" />' %
                   (5), file=logic)
-            print('         <phase duration="%d" state="rrrrrGrrrrrG" />' %
+            # Phase 3: E/W Left turn Green
+            print('         <phase duration="%d" state="rrrrrrGrrrrrrrGr" />' %
                   (times[1]), file=logic)
-            print('         <phase duration="%d" state="rrrrryrrrrry" />' %
+            # Phase 4: E/W Left turn Yellow
+            print('         <phase duration="%d" state="rrrrrryrrrrrrryr" />' %
                   (5), file=logic)
-            print('         <phase duration="%d" state="GGgrrrGGgrrr" />' %
+            # Phase 5: N/S Straight + Right + U-turn Green
+            print('         <phase duration="%d" state="GGgGrrrrGGgGrrrr" />' %
                   (times[2]), file=logic)
-            print('         <phase duration="%d" state="yygrrryygrrr" />' %
+            # Phase 6: N/S Yellow
+            print('         <phase duration="%d" state="yygyrrrryygyrrrr" />' %
                   (5), file=logic)
-            print('         <phase duration="%d" state="rrGrrrrrGrrr" />' %
+            # Phase 7: N/S Left turn Green
+            print('         <phase duration="%d" state="rrGrrrrrrrGrrrrr" />' %
                   (times[3]), file=logic)
-            print('         <phase duration="%d" state="rryrrrrryrrr" />' %
+            # Phase 8: N/S Left turn Yellow
+            print('         <phase duration="%d" state="rryrrrrrrryrrrrr" />' %
                   (5), file=logic)
             print("    </tlLogic>", file=logic)
         print("</additional>", file=logic)
@@ -271,7 +282,7 @@ def generate_edges(n):
 xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/edges_file.xsd">''', file=edges)
 
         min_s = 5.0
-        max_s = 30.0
+        max_s = 15.0
 
         # edges at the bottom, right, top, left
         for i in range(1, (n+1)):
@@ -336,77 +347,95 @@ def generate_connections(n):
 xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/connections_file.xsd">''', file=connections)
 
         def print_intersection_connections(inedges, outedges):
+            # The order of connections matters for traffic light logic.
+            # Assuming a standard 4-way intersection where in-edges and out-edges
+            # are ordered [North, East, South, West].
+            # A car coming from North (inedges[0]) can:
+            # - Turn left to East (outedges[1])
+            # - Go straight to South (outedges[2])
+            # - Turn right to West (outedges[3])
+            # This corresponds to j=1, j=2, j=3 in the loop below.
             for i in range(4):
                 for j in range(1, 4):
                     print('    <connection from="%i" to="%i"/>' %
                           (inedges[i], outedges[(i+j) % 4]), file=connections)
 
-        all_intersections_in = []
-        all_intersections_out = []
+        if n == 1:
+            # Special case for n=1 grid.
+            # Node 2 is South, 3 is East, 4 is North, 5 is West.
+            # In-edges are from peripheral nodes to the central node 1.
+            # Out-edges are from node 1 to peripheral nodes.
+            # The order is North, East, South, West to match standard intersection logic.
+            inedges = [4001, 3001, 2001, 5001]
+            outedges = [1004, 1003, 1002, 1005]
+            print_intersection_connections(inedges, outedges)
+        else:
+            all_intersections_in = []
+            all_intersections_out = []
 
-        # intersections that are not on the border (there are (n-2) x (n-2) of these)
-        for i in range(1, n-1):
-            for j in range(1, n-1):
-                int_number = n*i + j + 1
-                this_in_int = [1000*(int_number-n) + int_number, 1000*(int_number+1) + int_number, 1000*(
-                    int_number+n) + int_number, 1000*(int_number-1) + int_number]
-                this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + int_number + 1, 1000*(
+            # intersections that are not on the border (there are (n-2) x (n-2) of these)
+            for i in range(1, n-1):
+                for j in range(1, n-1):
+                    int_number = n*i + j + 1
+                    this_in_int = [1000*(int_number-n) + int_number, 1000*(int_number+1) + int_number, 1000*(
+                        int_number+n) + int_number, 1000*(int_number-1) + int_number]
+                    this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + int_number + 1, 1000*(
+                        int_number) + int_number + n, 1000*(int_number) + int_number - 1]
+                    all_intersections_in.append(this_in_int)
+                    all_intersections_out.append(this_out_int)
+
+            # intersections that are on the corners (there are 4 of these)
+            all_intersections_in.append(
+                [1000*(n*n + 1) + 1, 1000*(2) + 1, 1000*(1+n) + 1, 1000*(n*(n+4)) + 1])
+            all_intersections_out.append(
+                [1000*(1) + n*n + 1, 1000*(1) + 2, 1000*(1) + 1 + n, 1000*(1) + n*(n+4)])
+            all_intersections_in.append(
+                [1000*(n*(n+1)) + n, 1000*(n*(n+1) + 1) + n, 1000*(2*n) + n, 1000*(n-1) + n])
+            all_intersections_out.append(
+                [1000*(n) + n*(n+1), 1000*(n) + n*(n+1) + 1, 1000*(n) + 2*n, 1000*(n) + n-1])
+            all_intersections_in.append(
+                [1000*(n*(n-1)) + n*n, 1000*(n*(n+2)) + n*n, 1000*((n+1)*(n+1)) + n*n, 1000*(n*n-1) + n*n])
+            all_intersections_out.append(
+                [1000*(n*n) + n*(n-1), 1000*(n*n) + n*(n+2), 1000*(n*n) + (n+1)*(n+1), 1000*(n*n) + n*n-1])
+            all_intersections_in.append([1000*((n-1)*(n-1)) + (n*n-n+1), 1000*(n*n-n+2) + (
+                n*n-n+1), 1000*(n*(n+3)) + (n*n-n+1), 1000*(n*n+3*n+1) + (n*n-n+1)])
+            all_intersections_out.append([1000*(n*n-n+1) + (n-1)*(n-1), 1000*((n*n-n+1)) + (
+                n*n-n+2), 1000*((n*n-n+1)) + n*(n+3), 1000*(n*n-n+1) + (n*n+3*n+1)])
+
+            # intersections on the sides that are not corners (there are 4n - 4 of these)
+            for i in range(2, n):
+                int_number = i
+                this_in_int = [1000*(n*n+i) + int_number, 1000*(int_number+1) + int_number,
+                               1000*(int_number+n) + int_number, 1000*(int_number-1) + int_number]
+                this_out_int = [1000*(int_number) + (n*n+i), 1000*(int_number) + int_number + 1, 1000*(
                     int_number) + int_number + n, 1000*(int_number) + int_number - 1]
                 all_intersections_in.append(this_in_int)
                 all_intersections_out.append(this_out_int)
+                int_number = i*n
+                this_in_int = [1000*(int_number-n) + int_number, 1000*(n*n+n+i) + int_number,
+                               1000*(int_number+n) + int_number, 1000*(int_number-1) + int_number]
+                this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + (
+                    n*n+n+i), 1000*(int_number) + int_number + n, 1000*(int_number) + int_number - 1]
+                all_intersections_in.append(this_in_int)
+                all_intersections_out.append(this_out_int)
+                int_number = n*n - i + 1
+                this_in_int = [1000*(int_number-n) + int_number, 1000*(int_number+1) + int_number,
+                               1000*(n*n + 2*n + i) + int_number, 1000*(int_number-1) + int_number]
+                this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + int_number + 1,
+                                1000*(int_number) + (n*n + 2*n + i), 1000*(int_number) + int_number - 1]
+                all_intersections_in.append(this_in_int)
+                all_intersections_out.append(this_out_int)
+                int_number = n*(i-1) + 1
+                this_in_int = [1000*(int_number-n) + int_number, 1000*(int_number+1) + int_number,
+                               1000*(int_number+n) + int_number, 1000*(n*(n+4)-i+1) + int_number]
+                this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + int_number + 1,
+                                1000*(int_number) + int_number + n, 1000*(int_number) + (n*(n+4)-i+1)]
+                all_intersections_in.append(this_in_int)
+                all_intersections_out.append(this_out_int)
 
-        # intersections that are on the corners (there are 4 of these)
-        all_intersections_in.append(
-            [1000*(n*n + 1) + 1, 1000*(2) + 1, 1000*(1+n) + 1, 1000*(n*(n+4)) + 1])
-        all_intersections_out.append(
-            [1000*(1) + n*n + 1, 1000*(1) + 2, 1000*(1) + 1 + n, 1000*(1) + n*(n+4)])
-        all_intersections_in.append(
-            [1000*(n*(n+1)) + n, 1000*(n*(n+1) + 1) + n, 1000*(2*n) + n, 1000*(n-1) + n])
-        all_intersections_out.append(
-            [1000*(n) + n*(n+1), 1000*(n) + n*(n+1) + 1, 1000*(n) + 2*n, 1000*(n) + n-1])
-        all_intersections_in.append(
-            [1000*(n*(n-1)) + n*n, 1000*(n*(n+2)) + n*n, 1000*((n+1)*(n+1)) + n*n, 1000*(n*n-1) + n*n])
-        all_intersections_out.append(
-            [1000*(n*n) + n*(n-1), 1000*(n*n) + n*(n+2), 1000*(n*n) + (n+1)*(n+1), 1000*(n*n) + n*n-1])
-        all_intersections_in.append([1000*((n-1)*(n-1)) + (n*n-n+1), 1000*(n*n-n+2) + (
-            n*n-n+1), 1000*(n*(n+3)) + (n*n-n+1), 1000*(n*n+3*n+1) + (n*n-n+1)])
-        all_intersections_out.append([1000*(n*n-n+1) + (n-1)*(n-1), 1000*((n*n-n+1)) + (
-            n*n-n+2), 1000*((n*n-n+1)) + n*(n+3), 1000*(n*n-n+1) + (n*n+3*n+1)])
-
-        # intersections on the sides that are not corners (there are 4n - 4 of these)
-        for i in range(2, n):
-            int_number = i
-            this_in_int = [1000*(n*n+i) + int_number, 1000*(int_number+1) + int_number,
-                           1000*(int_number+n) + int_number, 1000*(int_number-1) + int_number]
-            this_out_int = [1000*(int_number) + (n*n+i), 1000*(int_number) + int_number + 1, 1000*(
-                int_number) + int_number + n, 1000*(int_number) + int_number - 1]
-            all_intersections_in.append(this_in_int)
-            all_intersections_out.append(this_out_int)
-            int_number = i*n
-            this_in_int = [1000*(int_number-n) + int_number, 1000*(n*n+n+i) + int_number,
-                           1000*(int_number+n) + int_number, 1000*(int_number-1) + int_number]
-            this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + (
-                n*n+n+i), 1000*(int_number) + int_number + n, 1000*(int_number) + int_number - 1]
-            all_intersections_in.append(this_in_int)
-            all_intersections_out.append(this_out_int)
-            int_number = n*n - i + 1
-            this_in_int = [1000*(int_number-n) + int_number, 1000*(int_number+1) + int_number,
-                           1000*(n*n + 2*n + i) + int_number, 1000*(int_number-1) + int_number]
-            this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + int_number + 1,
-                            1000*(int_number) + (n*n + 2*n + i), 1000*(int_number) + int_number - 1]
-            all_intersections_in.append(this_in_int)
-            all_intersections_out.append(this_out_int)
-            int_number = n*(i-1) + 1
-            this_in_int = [1000*(int_number-n) + int_number, 1000*(int_number+1) + int_number,
-                           1000*(int_number+n) + int_number, 1000*(n*(n+4)-i+1) + int_number]
-            this_out_int = [1000*(int_number) + int_number - n, 1000*(int_number) + int_number + 1,
-                            1000*(int_number) + int_number + n, 1000*(int_number) + (n*(n+4)-i+1)]
-            all_intersections_in.append(this_in_int)
-            all_intersections_out.append(this_out_int)
-
-        for i in range(len(all_intersections_in)):
-            print_intersection_connections(
-                all_intersections_in[i], all_intersections_out[i])
+            for i in range(len(all_intersections_in)):
+                print_intersection_connections(
+                    all_intersections_in[i], all_intersections_out[i])
 
         print('</connections>', file=connections)
 
@@ -429,23 +458,28 @@ def run(max_step=-1):
 # to setup the xml files and run the default traffic light logic case of SUMO
 
 
-def setup_and_run_sumo(n, seed_val):
-
+def setup_and_run_sumo(n, seed_val, use_gui):
     summaryFile = 'summary.xml'
-
     generate_nodes(n)
     all_edge_ids = generate_edges(n)
     generate_connections(n)
+    # Rebuild the network file using the generated node, edge, and connection files
+    netconvert_binary = checkBinary('netconvert')
+
+    subprocess.run([netconvert_binary, "-n", "data/cross.nod.xml", "-e", "data/cross.edg.xml",
+                   "-c", "data/cross.con.xml", "-o", "data/cross.net.xml"], check=True)
 
     meanWaits = []
+
     meanTravels = []
 
     direction_map = generate_direction_maps(n)
+
     edge_prob = generate_edge_probs(all_edge_ids, seed_val)
 
     generate_routefile(edge_prob, direction_map, n, seed_val)
 
-    run_sumo(n, summaryFile, [40, 5, 20, 5])
+    run_sumo(n, summaryFile, [40, 5, 20, 5], use_gui=use_gui)
 
 # to only run SUMO simulation (and leave XML files the way they are already)
 # this can run the default SUMO traffic light logic or the ACO logic or the PSO logic
@@ -454,7 +488,7 @@ def setup_and_run_sumo(n, seed_val):
 # for run_sumo, the maps and route schedules remain identical between iterations
 
 
-def run_sumo(n, summaryFile='summary.xml', tl_data=None, thetype=None):
+def run_sumo(n, summaryFile='summary.xml', tl_data=None, thetype=None, use_gui=False):
     travel_times = []
     nsims = 1
 
@@ -468,7 +502,10 @@ def run_sumo(n, summaryFile='summary.xml', tl_data=None, thetype=None):
 
     for j in range(nsims):
 
-        sumoBinary = checkBinary('sumo')
+        if use_gui:
+            sumoBinary = checkBinary('sumo-gui')
+        else:
+            sumoBinary = checkBinary('sumo')
 
         # this is the normal way of using traci. sumo is started as a
         # subprocess and then the python script connects and runs
@@ -509,12 +546,8 @@ def main(arguments):
     n = args.n
     seed_val = args.seed
     max_step = args.max_step
-    if args.use_gui:
-        sumoBinary = checkBinary('sumo')
-    else:
-        sumoBinary = checkBinary('sumo-gui')
 
-    setup_and_run_sumo(n, seed_val)
+    setup_and_run_sumo(n, seed_val, args.use_gui)
 
 
 if __name__ == '__main__':
